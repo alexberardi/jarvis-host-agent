@@ -144,3 +144,50 @@ class TestLinuxSessionHonesty:
         caps = linux.capabilities()
         assert "open" in caps
         assert "windows.list" not in caps
+
+
+class TestWindowsAudioEndpointHonesty:
+    """Windows must not advertise volume when there is no playback device.
+
+    Found on a headless windows-latest runner: pycaw imported fine, so volume
+    was advertised, and the call then raised a raw COMError. Probing the library
+    is not the same as probing the capability -- the same mistake as the Linux
+    xdg-open case above.
+    """
+
+    @pytest.fixture
+    def windows(self):
+        return PROVIDERS["windows"]()
+
+    def test_unreachable_endpoint_means_no_volume_capability(self, windows, monkeypatch) -> None:
+        monkeypatch.setattr(
+            type(windows), "_endpoint", lambda _self: (_ for _ in ()).throw(OSError("no device"))
+        )
+        caps = windows.capabilities()
+        assert "volume.get" not in caps
+        assert "volume.set" not in caps
+
+    def test_reachable_endpoint_means_volume_capability(self, windows, monkeypatch) -> None:
+        monkeypatch.setattr(type(windows), "_endpoint", lambda _self: object())
+        caps = windows.capabilities()
+        assert {"volume.get", "volume.set"} <= caps
+
+    def test_com_error_surfaces_as_not_supported_not_a_500(self, windows, monkeypatch) -> None:
+        """A missing device is a 501, never a raw ctypes error escaping as 500."""
+        from jarvis_host_agent.errors import NotSupported
+
+        monkeypatch.setattr(
+            type(windows),
+            "_volume_module",
+            staticmethod(
+                lambda: (_FakeAudioUtilities, object(), 0, lambda *a: None, lambda *a: None)
+            ),
+        )
+        with pytest.raises(NotSupported, match="no usable audio endpoint"):
+            windows.get_volume()
+
+
+class _FakeAudioUtilities:
+    @staticmethod
+    def GetSpeakers():  # noqa: N802 - mirrors pycaw's API
+        raise OSError("Element not found.")

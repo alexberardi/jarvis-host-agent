@@ -28,7 +28,11 @@ class WindowsProvider(HostProvider):
 
     def capabilities(self) -> set[str]:
         names: set[str] = {OPEN}
-        if self._volume_module() is not None:
+        # Probe the actual endpoint, not merely whether pycaw imports. A machine
+        # with no playback device -- a headless VM, a server, some RDP sessions --
+        # has the library and no audio, and reporting volume support there means
+        # a caller gets a COMError where it expected a level.
+        if self._volume_available():
             names |= {VOLUME_GET, VOLUME_SET}
         if self._win32() is not None:
             names |= {WINDOWS_LIST, WINDOWS_MINIMIZE, WINDOWS_FOCUS, WINDOWS_CLOSE}
@@ -56,14 +60,26 @@ class WindowsProvider(HostProvider):
             return None
         return (win32gui, win32con)
 
+    def _volume_available(self) -> bool:
+        try:
+            self._endpoint()
+        except Exception:
+            return False
+        return True
+
     def _endpoint(self):
         mod = self._volume_module()
         if mod is None:
             raise NotSupported("pycaw/comtypes unavailable; cannot reach WASAPI")
         AudioUtilities, IAudioEndpointVolume, CLSCTX_ALL, cast, POINTER = mod
-        speakers = AudioUtilities.GetSpeakers()
-        interface = speakers.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-        return cast(interface, POINTER(IAudioEndpointVolume))
+        try:
+            speakers = AudioUtilities.GetSpeakers()
+            interface = speakers.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+            return cast(interface, POINTER(IAudioEndpointVolume))
+        except OSError as exc:
+            # COMError subclasses OSError. "Element not found" means there is no
+            # default render endpoint at all -- an absent capability, not a fault.
+            raise NotSupported(f"no usable audio endpoint on this host: {exc}") from exc
 
     # ---- volume ---------------------------------------------------------
 
