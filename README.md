@@ -58,6 +58,40 @@ window control needs a TCC Accessibility grant for whichever process hosts the
 agent, and silently fails without it; a **headless node** has no windows and
 cannot meaningfully `open` anything.
 
+## Install
+
+The agent runs **natively, in the user's desktop session** — never as a daemon,
+system unit, or Windows service. That is not a style preference: outside an
+interactive session there is no window server, so window control and `open`
+stop working while volume keeps succeeding, which looks like a half-broken
+agent rather than a misinstall.
+
+```bash
+# macOS — per-user LaunchAgent
+./deploy/install-macos.sh
+
+# Linux — systemd user unit
+./deploy/install-linux.sh
+```
+
+```powershell
+# Windows — Scheduled Task, triggered at logon, interactive token
+.\deploy\windows\Install-HostAgent.ps1
+```
+
+Each installer substitutes the agent binary path and registers the supervisor;
+none of them need `sudo` or an elevated prompt. Platform notes:
+
+| | note |
+|---|---|
+| macOS | Grant **Accessibility** to the agent binary or window control reports itself unavailable |
+| Linux | `sudo loginctl enable-linger $USER` on a headless box, or the unit dies at logout |
+| Windows | Runs at logon only — there is no desktop to control while signed out |
+
+`tests/test_deploy_templates.py` enforces the session rules on all three, so a
+well-meaning change to a daemon/system unit/SYSTEM task fails CI rather than
+shipping a silently crippled install.
+
 ## Configuration
 
 | Variable | Default | |

@@ -96,6 +96,20 @@ on its own:
     provider degrades; a wrong *host* provider would shell out to binaries that
     do not exist and advertise capabilities it lacks.
 
+11. **The agent runs in the user's interactive session on all three
+    platforms** — LaunchAgent, systemd *user* unit, Scheduled Task with
+    `InteractiveToken`. Never a LaunchDaemon, system unit, or Windows service:
+    Session 0 (and a root system unit, and a daemon) has no window station, so
+    `open` launches into nothing and window enumeration comes back empty while
+    volume keeps working. `tests/test_deploy_templates.py` fails CI on any of
+    those conversions.
+12. **`RunLevel` stays `LeastPrivilege` on Windows.** UIPI blocks an elevated
+    process from sending window messages to non-elevated apps, so "run as
+    admin" breaks the window control it looks like it would help.
+13. **Don't grep template prose in a guard.** The SYSTEM-account check parses
+    `UserId` elements; an earlier version matched the comment explaining why
+    SYSTEM is wrong, and passed for the wrong reason.
+
 ## Testing
 
 - `tests/test_contract.py` — one assertion set, every provider, every OS.
