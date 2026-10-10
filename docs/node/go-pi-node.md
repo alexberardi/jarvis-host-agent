@@ -522,25 +522,23 @@ These are **still needed**; install.sh step lines are cited:
 
 ---
 
-## 8. Open questions (each with a recommendation)
+## 8. Decisions on the open questions (user, 2026-10-10)
 
-1. Upload STT audio at 16 kHz or 48 kHz? **Recommendation: 48 kHz first for parity, then 16 kHz
-   (3× smaller) after an A/B on speaker ID.**
-2. Keep PulseAudio on the Pi? **Recommendation: yes for v1 (Bluetooth, AEC, music). Offer ALSA-only
-   later for HAT-only nodes.**
-3. ORT embedded in the binary (jarvisd style) or a separate file in the Pi tarball?
-   **Recommendation: a separate file on the Pi; embedded on desktop.**
-4. Start the sidecar eagerly or on the first tool call? **Recommendation: eagerly; revisit only if a
-   Zero 2 W gets tight.**
-5. Keep oww `hey_jarvis` as the wake engine? **Recommendation: yes. It is bit-exact and its
-   thresholds are tuned.**
-6. Heartbeat `install_mode` for the Go Pi node? **Recommendation: report `tarball` (the server's
-   update gate requires it) plus `version_info.runtime: "go"`.**
-7. Provisioning: hostapd/dnsmasq exec or NetworkManager D-Bus? **Recommendation: hostapd exec, as
-   the Python node does on Pis.**
-8. Open the Python quick-win PR now? **Recommendation: yes. It is small and independent.**
-9. `jarvis-node-runtime` package or SDK backends? **Recommendation: SDK backends (§5.2).**
-10. Desktop voice: Linux only first? **Recommendation: yes; macOS next.**
+| # | Question | Decision |
+|---|---|---|
+| 1 | STT upload rate | **48 kHz first** for parity; A/B speaker ID at 16 kHz, switch if it holds up. |
+| 2 | PulseAudio on the Pi | **Keep for v1** (Bluetooth, echo cancellation, ducking). ALSA-only mode later for HAT-only nodes. |
+| 3 | ORT packaging | **Separate file in the Pi tarball; embedded in the desktop binary.** |
+| 4 | Sidecar start | **Eagerly at boot.** Revisit only if a Zero 2 W gets tight. |
+| 5 | Wake engine | **openWakeWord `hey_jarvis`** (bit-exact, thresholds carry over). |
+| 6 | Heartbeat identity | **`install_mode: "tarball"` + `version_info.runtime: "go"`.** |
+| 7 | Provisioning AP | **NetworkManager over D-Bus** (not the recommended hostapd exec). Both lab Pis run Debian 13 trixie with NetworkManager active, so this is the native path; it also serves desktop Linux. hostapd exec stays the fallback if NM's AP mode fails on a given Wi-Fi chip. |
+| 8 | Python quick win | **Done:** jarvis-node-setup #144 (−77 MB RSS), shipped in node v0.3.5. |
+| 9 | Runtime package vs SDK backends | **SDK backends (§5.2).** |
+| 10 | Desktop voice order | **Linux and macOS together** (not Linux-first). ALSA via purego and AudioQueue via purego land in the same phase; Windows (WASAPI) follows. |
+
+Phase 3 of §7 therefore covers both Linux and macOS desktop voice, and phase 4.4 ports
+provisioning to NetworkManager D-Bus rather than hostapd.
 
 ---
 
