@@ -310,7 +310,17 @@ func status(ctx context.Context, args []string) error {
 	}
 	fmt.Printf("platform:     %s\ncapabilities: %s\n", h.Platform(), strings.Join(caps, ", "))
 	if macax.Supported() {
-		fmt.Printf("accessibility: %v\n", macax.Trusted())
+		trusted := macax.Trusted()
+		fmt.Printf("accessibility: %v\n", trusted)
+		if !trusted {
+			fmt.Print(`  -> Window control is OFF: this process has no Accessibility grant.
+     Turn on "Jarvis Agent" in System Settings > Privacy & Security > Accessibility.
+     If it already looks on, it's an old entry from a differently signed build. Run
+       tccutil reset Accessibility io.jarvis.agent && tccutil reset AppleEvents io.jarvis.agent
+     then restart the agent and allow it again. (Run from a terminal, this check reports the
+     terminal's grant; use scripts/dev-run.sh --status for the agent's own.)
+`)
+		}
 	}
 	if list, err := appCatalogue(nil)(); err != nil {
 		fmt.Printf("apps:         %v\n", err)
