@@ -102,6 +102,12 @@ provisioning, registration, broker, report_tools and mobile chat:
   absent (no AX grant) and `desktop_list_windows` → `not_supported`. The contract suite passes
   natively on darwin, and the native volume round-trip works. `open` was accepted (Firefox is
   the handler).
+- macOS TCC after the on-screen prompts: Automation (System Events) is **allowed** for the
+  binary's path (`kTCCServiceAppleEvents`, client `…/jarvis-agent-poc/jarvis-agent`, value 2).
+  Accessibility has a row for the same path, but it is **off** (value 0), so window control is
+  still correctly absent from both SSH and a GUI LaunchAgent. Approving the prompt only adds the
+  binary to the list; the user still has to turn it on in System Settings. Grants key on the
+  path plus the ad-hoc code signature, so a rebuilt binary needs granting again.
 - Not exercised on real hardware: any Windows path (CI's windows runner only); X11 window
   control (no X11 box); macOS window control (awaiting the on-screen grant).
 
