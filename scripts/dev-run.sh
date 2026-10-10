@@ -55,6 +55,22 @@ LOG_DIR="$HOME/Library/Logs"
 
 case $OS in Linux|Darwin) ;; *) die "Linux and macOS only (Windows: see docs/DESIGN.md)" ;; esac
 
+# ax_help explains a missing macOS Accessibility grant, including the stale-entry case: a grant
+# made for an earlier (differently signed) build stays switched on in Settings but doesn't
+# apply to this one. It only prints; resetting TCC is the user's call.
+ax_help() {
+  cat >&2 <<'EOF'
+
+dev-run: Accessibility is NOT granted to Jarvis Agent, so window control (list/focus/minimise/close) is off.
+  1. System Settings → Privacy & Security → Accessibility: turn on "Jarvis Agent".
+  2. If it already looks on, the switch belongs to an earlier, differently signed build. Reset it:
+       tccutil reset Accessibility io.jarvis.agent
+       tccutil reset AppleEvents io.jarvis.agent
+     then rerun scripts/dev-run.sh and turn "Jarvis Agent" on when macOS asks.
+  3. Check: scripts/dev-run.sh --status   (expect "accessibility: true" and windows.* capabilities)
+EOF
+}
+
 # --- uninstall needs no build ---
 if [ "$MODE" = uninstall ]; then
   if [ "$OS" = Darwin ]; then
@@ -95,12 +111,16 @@ if [ "$MODE" = status ]; then
 EOF
   launchctl bootout "gui/$(id -u)/$LABEL.status" 2>/dev/null || true
   launchctl bootstrap "gui/$(id -u)" "$sp"
-  for _ in $(seq 1 30); do
-    launchctl print "gui/$(id -u)/$LABEL.status" 2>/dev/null | grep -q 'state = running' || break
-    sleep 1
+  # status prints "enrollment:" or "jarvisd:" last. Wait for that line (the job may not have
+  # started yet when bootstrap returns), up to 30 s, and only then unload the job.
+  for _ in $(seq 1 60); do
+    grep -qE '^(enrollment|jarvisd):' "$out" 2>/dev/null && break
+    sleep 0.5
   done
   launchctl bootout "gui/$(id -u)/$LABEL.status" 2>/dev/null || true
+  [ -s "$out" ] || die "the agent printed nothing within 30 s (see: launchctl print gui/$(id -u)/$LABEL.status)"
   cat "$out"
+  grep -q '^accessibility: false' "$out" && ax_help
   exit 0
 fi
 
@@ -222,6 +242,8 @@ trap 'stop; exit 0' INT TERM
 trap stop EXIT
 say "running (Ctrl-C to stop); log: $LOG"
 sleep 2
+for _ in $(seq 1 10); do grep -q 'jarvis-agent starting' "$LOG" 2>/dev/null && break; sleep 0.5; done
+grep -q 'Accessibility not granted' "$LOG" 2>/dev/null && ax_help
 while launchctl print "gui/$(id -u)/$DEV_LABEL" 2>/dev/null | grep -q 'state = running'; do sleep 1; done
 code=$(launchctl print "gui/$(id -u)/$DEV_LABEL" 2>/dev/null | sed -n 's/.*last exit code = \(.*\)/\1/p' | head -n 1)
 say "the agent exited (${code:-unknown})"
