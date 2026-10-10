@@ -10,7 +10,8 @@ appears in the household's node list, and offers the host-agent capabilities as 
 
 | Tool | Capability | Linux | macOS | Windows |
 |---|---|---|---|---|
-| `desktop_open` | `open` | xdg-open (needs a session) | open(1) | ShellExecuteW |
+| `desktop_open` (link or app name) | `open` | xdg-open; apps: gio launch / gtk-launch | open(1) | ShellExecuteW |
+| `desktop_list_apps` | `open` | XDG .desktop entries | .app bundles | Start Menu .lnk |
 | `desktop_get_volume` | `volume.get` | pactl / wpctl / amixer | osascript | WASAPI (COM) |
 | `desktop_set_volume` | `volume.set` | same | same | same |
 | `desktop_list_windows` | `windows.list` | wmctrl (X11 only) | System Events (AX grant) | EnumWindows |
@@ -39,9 +40,19 @@ to exactly one. A tool is offered only while its capability is available, comput
 
 ## 3. Changes from the Python agent (deliberate)
 
-- **`open` has a policy.** Default: `http`, `https`, `mailto` links only. An arbitrary target
-  was effectively program execution driven by an STT transcript or an LLM. `--allow-open-any`
-  restores the old behaviour. (Open question 2.)
+- **`open` has a policy: links plus "anything in your apps folder".** Links: http, https and
+  mailto. Apps: whatever the platform's app locations hold (macOS `/Applications/**/*.app`,
+  `/System/Applications/**/*.app`, `~/Applications/**/*.app`; Linux XDG `applications/**/*.desktop`
+  in `$XDG_DATA_HOME` then `$XDG_DATA_DIRS`, honouring NoDisplay/Hidden and XDG id precedence, so
+  a user's Hidden override hides a system entry; Windows per-user then all-users Start Menu
+  `**/*.lnk`), plus `apps.json` allow globs, minus deny globs and `*uninstall*`. The model
+  names an app; resolution is case-insensitive in tiers (exact name or desktop id, then prefix,
+  then all words present, then an edit distance of 1, or 2 for longer names). The first tier with
+  hits decides, and several hits come back as `ambiguous` with candidates, never a guess. The
+  launched path is always the catalogue's. A path, a custom URI scheme (`steam://`) or a
+  leading `-` is refused. `--allow-open-any` restores "anything the OS can open". The
+  catalogue is rescanned per call (about 60 to 100 entries scan in milliseconds), so installs
+  and `apps.json` edits apply without a restart.
 - **The macOS AX probe tells the truth.** It lists the frontmost app's windows. "count
   processes" succeeds without assistive access and made the Python agent advertise window
   control that then failed. Verified on the MBP (macOS 26.1): absent over SSH *and* from a GUI
@@ -108,6 +119,27 @@ provisioning, registration, broker, report_tools and mobile chat:
   still correctly absent from both SSH and a GUI LaunchAgent. Approving the prompt only adds the
   binary to the list; the user still has to turn it on in System Settings. Grants key on the
   path plus the ad-hoc code signature, so a rebuilt binary needs granting again.
+- **Follow-up round (apps, bundle, script), 2026-10-09:**
+  - Linux, real catalogue (62 apps): `jarvis-agent apps` resolved steam, writer → LibreOffice
+    Writer, witcher → The Witcher 3, "the steam app" → Steam, and "red dead"; it reported
+    "google" as ambiguous among 4 and found nothing for photoshop. `desktop_open "image viewer"`
+    launched imv via `gio launch`.
+  - `scripts/dev-run.sh` on Linux against the throwaway jarvisd: built, enrolled once (second
+    run "Already enrolled"), connected, and Ctrl-C (SIGINT) exited 0. `--install` brought up the
+    systemd user unit (connected, with a Wayland session env), and `--uninstall` removed it.
+  - macOS (MBP, over SSH): the script built and ad-hoc signed `~/Applications/Jarvis Agent.app`
+    (codesign: Identifier=io.jarvis.agent), enrolled through the tunnel, and ran under launchd.
+    The AX prompt **made macOS add an `io.jarvis.agent` row** to Accessibility (off until the
+    user enables it). Over mobile chat, `desktop_list_apps calc` → Calculator,
+    `desktop_open calculator` launched Calculator, and a `.app` path was refused. Ctrl-C
+    unloaded the launchd job, and `--install`/`--uninstall` worked.
+  - macOS window control on real hardware: the user's earlier toggle for the bare binary did
+    land in TCC (allowed, even though the UI never listed it). Run as that binary under launchd,
+    `desktop_list_windows` returned the 11 real windows (`pid/index` ids, titles, apps), and
+    `desktop_focus_window` brought Firefox to the front.
+  - Developer ID signing **fails over SSH** (`errSecInternalComponent`: the login keychain isn't
+    available to the SSH session). Signing must run in the user's local Terminal, so the SSH
+    tests used ad-hoc.
 - Not exercised on real hardware: any Windows path (CI's windows runner only); X11 window
   control (no X11 box); macOS window control (awaiting the on-screen grant).
 
@@ -182,12 +214,17 @@ packages may assume the sidecar but not audio in/out.
    *Recommend:* have the heartbeat declare `node_kind: "desktop"` and the verbs it speaks;
    jarvisd skips unsupported verbs. Later, let CC offer a household's desktop tools in a Pi's
    turn with node-qualified dispatch ("turn down my computer").
-2. **Open policy default.** Links only is safe but can't "open Steam". *Recommend:* keep links
-   by default and add a local, user-edited app allowlist (`name → target`), never arbitrary
-   paths from the model.
-3. **macOS signing.** Without a Developer ID signature, every update loses the Accessibility
-   grant. *Recommend:* sign and notarize release builds (stable designated requirement), and
-   have `status` say which grant is missing.
+2. **Open policy.** Done as wildcards ("anything in your apps folder") + `apps.json`. Left
+   open: whether `desktop_open` on an app the user has never launched should need a
+   confirmation, and whether CC should get the app list up front (it's in `desktop_list_apps`
+   now, costing a round trip). *Recommend:* no confirmation for v1; revisit if mishearings
+   launch the wrong thing.
+3. **macOS signing.** The dev bundle is signed by `dev-run.sh` with the keychain's Developer ID
+   (designated requirement = team + `io.jarvis.agent`), so grants survive rebuilds. It is not
+   notarized and has no hardened runtime. Hardened runtime would need the
+   `com.apple.security.automation.apple-events` entitlement, plus a check that purego's
+   dlopen of system frameworks passes library validation. *Recommend:* notarize release
+   builds in CI with hardened runtime, and keep dev builds as they are.
 4. **Sidecar privilege (TCC inheritance, §7).** *Recommend:* accept for v1, but require
    packages to declare `permissions: [accessibility, automation]` in the manifest and show it
    at install.

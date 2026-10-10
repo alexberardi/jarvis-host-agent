@@ -5,6 +5,7 @@
 #   scripts/dev-run.sh                       # afterwards: build and run in the foreground
 #   scripts/dev-run.sh --install             # start at login instead (user session only)
 #   scripts/dev-run.sh --uninstall           # stop starting at login (keeps the enrollment)
+#   scripts/dev-run.sh --status              # what the agent can do right now, as the agent
 #
 # Options:
 #   --server URL      jarvisd's address (only needed to enroll)
@@ -12,6 +13,8 @@
 #   --household ID    only if your account belongs to several households
 #   --install         install as a systemd user unit (Linux) or LaunchAgent (macOS) and start it
 #   --uninstall       remove that unit/agent
+#   --status          print the agent's capabilities (on macOS run as Jarvis Agent via launchd:
+#                     from a terminal, macOS would report the terminal's permissions instead)
 #   -- ARGS           extra `jarvis-agent run` flags, e.g. -- --allow-open-any
 #
 # macOS: the build is "~/Applications/Jarvis Agent.app", signed with your Developer ID (or
@@ -31,8 +34,9 @@ while [ $# -gt 0 ]; do
     --household) HOUSEHOLD=$2; shift 2 ;;
     --install) MODE=install; shift ;;
     --uninstall) MODE=uninstall; shift ;;
+    --status) MODE=status; shift ;;
     --) shift; break ;;
-    -h|--help) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit 0 ;;
     *) echo "dev-run: unknown argument $1 (run flags go after --)" >&2; exit 2 ;;
   esac
 done
@@ -62,6 +66,41 @@ if [ "$MODE" = uninstall ]; then
     systemctl --user daemon-reload
   fi
   say "uninstalled; the enrollment is kept (re-enroll with: jarvis-agent enroll --force ...)"
+  exit 0
+fi
+
+# --- status needs no build either ---
+if [ "$MODE" = status ]; then
+  if [ "$OS" = Linux ]; then
+    [ -x "$ROOT/dist/jarvis-agent" ] || die "not built yet: run scripts/dev-run.sh first"
+    exec "$ROOT/dist/jarvis-agent" status
+  fi
+  BIN="$APP/Contents/MacOS/jarvis-agent"
+  [ -x "$BIN" ] || die "not built yet: run scripts/dev-run.sh first"
+  mkdir -p "$ROOT/dist"
+  out="$ROOT/dist/status.log"
+  : > "$out"
+  sp="$ROOT/dist/$LABEL.status.plist"
+  cat > "$sp" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>$LABEL.status</string>
+  <key>ProgramArguments</key><array><string>$BIN</string><string>status</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>ProcessType</key><string>Interactive</string>
+  <key>StandardOutPath</key><string>$out</string>
+  <key>StandardErrorPath</key><string>$out</string>
+</dict></plist>
+EOF
+  launchctl bootout "gui/$(id -u)/$LABEL.status" 2>/dev/null || true
+  launchctl bootstrap "gui/$(id -u)" "$sp"
+  for _ in $(seq 1 30); do
+    launchctl print "gui/$(id -u)/$LABEL.status" 2>/dev/null | grep -q 'state = running' || break
+    sleep 1
+  done
+  launchctl bootout "gui/$(id -u)/$LABEL.status" 2>/dev/null || true
+  cat "$out"
   exit 0
 fi
 
