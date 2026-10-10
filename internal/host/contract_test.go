@@ -3,7 +3,6 @@ package host
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
@@ -308,8 +307,9 @@ func TestCapabilityGateRunsBeforeTheBackend(t *testing.T) {
 // LaunchApp is fire-and-forget, launches exactly the catalogue path, refuses relative paths,
 // and is gated like open.
 func TestLaunchAppIsFireAndForget(t *testing.T) {
-	app := filepath.Join(t.TempDir(), "Steam")
 	forEach(t, func(t *testing.T, s subject) {
+		app := map[string]string{"linux": "/usr/share/applications/steam.desktop", "darwin": "/Applications/Steam.app",
+			"windows": `C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Steam.lnk`}[s.platform]
 		b, rec := s.full()
 		if err := New(b).LaunchApp(ctx, app); err != nil {
 			t.Fatal(err)
@@ -329,6 +329,11 @@ func TestLaunchAppIsFireAndForget(t *testing.T) {
 			}
 		}
 		b2, rec2 := s.full()
+		for _, rel := range []string{"Steam", `Steam\x.lnk`, "./Steam.app"} {
+			if err := New(b2).LaunchApp(ctx, rel); !errors.Is(err, ErrInvalidTarget) {
+				t.Fatalf("relative path %q: err = %v", rel, err)
+			}
+		}
 		if err := New(b2).LaunchApp(ctx, "Steam"); !errors.Is(err, ErrInvalidTarget) {
 			t.Fatalf("relative path: err = %v", err)
 		}

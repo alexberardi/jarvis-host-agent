@@ -51,7 +51,9 @@ func DefaultSources(e Env) []Source {
 		if dataDirs == "" {
 			dataDirs = "/usr/local/share:/usr/share"
 		}
-		for _, d := range strings.Split(dataDirs, ":") {
+		// XDG uses ':'; filepath.SplitList is ':' on Unix (and ';' on Windows, where only the
+		// cross-OS tests run this branch, with Windows paths that contain ':').
+		for _, d := range filepath.SplitList(dataDirs) {
 			if d != "" {
 				dirs = append(dirs, d)
 			}

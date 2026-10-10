@@ -20,8 +20,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"sort"
+	"strings"
 )
 
 // Capability names are a wire contract: CC decides whether to offer a tool from them. A typo
@@ -257,8 +257,21 @@ func (h *Host) LaunchApp(ctx context.Context, path string) error {
 	if err := h.gate(ctx, CapOpen); err != nil {
 		return err
 	}
-	if !filepath.IsAbs(path) {
+	if !absFor(h.b.Platform(), path) {
 		return Errorf(ErrInvalidTarget, "app path must be absolute: %q", path)
 	}
 	return h.b.LaunchApp(ctx, path)
+}
+
+// absFor judges absoluteness by the backend's platform, not the OS running the code, so the
+// contract suite gives the same answer on every runner.
+func absFor(platform, p string) bool {
+	if platform != "windows" {
+		return strings.HasPrefix(p, "/")
+	}
+	if strings.HasPrefix(p, `\\`) { // UNC
+		return true
+	}
+	return len(p) >= 3 && p[1] == ':' && (p[2] == '\\' || p[2] == '/') &&
+		((p[0] >= 'A' && p[0] <= 'Z') || (p[0] >= 'a' && p[0] <= 'z'))
 }

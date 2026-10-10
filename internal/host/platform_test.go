@@ -131,3 +131,25 @@ func TestLinuxLaunchFallsBackToGtkLaunch(t *testing.T) {
 		t.Fatalf("no launcher: err = %v", err)
 	}
 }
+
+func TestAbsoluteByBackendPlatformNotRunner(t *testing.T) {
+	for _, tc := range []struct {
+		platform, path string
+		want           bool
+	}{
+		{"linux", "/usr/share/applications/x.desktop", true},
+		{"darwin", "/Applications/Steam.app", true},
+		{"darwin", "Steam.app", false},
+		{"darwin", `C:\Steam.app`, false},
+		{"windows", `C:\ProgramData\Steam.lnk`, true},
+		{"windows", `c:/Users/x/Steam.lnk`, true},
+		{"windows", `\\server\share\Steam.lnk`, true},
+		{"windows", "/Applications/Steam.app", false},
+		{"windows", `Steam.lnk`, false},
+		{"windows", `1:\x`, false},
+	} {
+		if got := absFor(tc.platform, tc.path); got != tc.want {
+			t.Errorf("absFor(%s, %q) = %v", tc.platform, tc.path, got)
+		}
+	}
+}
