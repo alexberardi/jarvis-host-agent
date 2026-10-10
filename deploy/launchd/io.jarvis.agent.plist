@@ -31,6 +31,10 @@
     <key>StandardErrorPath</key>
     <string>__LOG_DIR__/jarvis-agent.err.log</string>
 
+    <!-- Shows the agent as "Jarvis Agent" in Login Items rather than a bare path. -->
+    <key>AssociatedBundleIdentifiers</key>
+    <string>io.jarvis.agent</string>
+
     <key>ProcessType</key>
     <string>Interactive</string>
 </dict>

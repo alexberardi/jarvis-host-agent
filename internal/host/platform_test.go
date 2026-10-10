@@ -115,3 +115,19 @@ func TestWindowsWithoutDesktopKeepsVolume(t *testing.T) {
 		t.Fatalf("caps = %v", caps)
 	}
 }
+
+func TestLinuxLaunchFallsBackToGtkLaunch(t *testing.T) {
+	s := linuxFull()
+	delete(s.bins, "gio")
+	s.bins["gtk-launch"] = true
+	if err := New(NewLinux(s)).LaunchApp(ctx, "/usr/share/applications/org.gnome.Calculator.desktop"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(s.starts, ";") != "gtk-launch org.gnome.Calculator" {
+		t.Fatalf("starts = %v", s.starts)
+	}
+	delete(s.bins, "gtk-launch")
+	if err := New(NewLinux(s)).LaunchApp(ctx, "/x/y.desktop"); !errors.Is(err, ErrNotSupported) {
+		t.Fatalf("no launcher: err = %v", err)
+	}
+}

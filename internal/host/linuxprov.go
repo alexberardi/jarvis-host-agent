@@ -3,6 +3,7 @@ package host
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -228,6 +229,27 @@ func (l *Linux) Open(_ context.Context, target string) error {
 	}
 	if err := l.Sys.Start("xdg-open", target); err != nil {
 		return Errorf(ErrOperationFailed, "could not open %q: %v", target, err)
+	}
+	return nil
+}
+
+// LaunchApp starts a .desktop entry. xdg-open would open the file in an editor, so this uses
+// gio launch (GLib 2.67+), falling back to gtk-launch with the desktop-file id.
+func (l *Linux) LaunchApp(_ context.Context, path string) error {
+	if !l.sessionAvailable() {
+		return Errorf(ErrNotSupported, "no graphical session to launch an app into")
+	}
+	var err error
+	switch {
+	case l.Sys.LookPath("gio"):
+		err = l.Sys.Start("gio", "launch", path)
+	case l.Sys.LookPath("gtk-launch"):
+		err = l.Sys.Start("gtk-launch", strings.TrimSuffix(filepath.Base(path), ".desktop"))
+	default:
+		return Errorf(ErrNotSupported, "launching apps needs gio or gtk-launch")
+	}
+	if err != nil {
+		return Errorf(ErrOperationFailed, "could not launch %q: %v", path, err)
 	}
 	return nil
 }

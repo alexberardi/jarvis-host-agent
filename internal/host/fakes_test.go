@@ -129,7 +129,7 @@ const (
 func linuxFull() *fakeSys {
 	vol := 40
 	return &fakeSys{
-		bins: map[string]bool{"xdg-open": true, "pactl": true, "wmctrl": true, "xdotool": true},
+		bins: map[string]bool{"xdg-open": true, "gio": true, "pactl": true, "wmctrl": true, "xdotool": true},
 		env:  map[string]string{"DISPLAY": ":0"},
 		handler: func(name string, args []string) (string, error) {
 			switch {

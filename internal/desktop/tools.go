@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/alexberardi/jarvis-host-agent/internal/apps"
 	"github.com/alexberardi/jarvis-host-agent/internal/host"
 	"github.com/alexberardi/jarvis-host-agent/internal/node"
 )
@@ -26,32 +27,49 @@ const (
 	ToolMinimize  = "desktop_minimize_window"
 	ToolFocus     = "desktop_focus_window"
 	ToolClose     = "desktop_close_window"
+	ToolListApps  = "desktop_list_apps"
 )
 
-// OpenPolicy decides what desktop_open may hand to the OS. The default allows web and mail
-// links only: an arbitrary path or app name is program execution driven by an STT transcript.
+// OpenPolicy decides what desktop_open may hand to the OS: web and mail links, and installed
+// applications by name (the apps catalogue). Never a path, a custom URI scheme or arguments
+// from the model: an arbitrary target is program execution driven by an STT transcript.
 type OpenPolicy struct {
-	AllowAny bool // opt-in escape hatch (config); restores "anything the OS can open"
+	AllowAny bool // opt-in escape hatch (--allow-open-any); restores "anything the OS can open"
 }
 
 var openSchemes = map[string]bool{"http": true, "https": true, "mailto": true}
 
-// Check returns nil when target may be opened.
-func (p OpenPolicy) Check(target string) error {
-	if strings.TrimSpace(target) == "" {
-		return host.Errorf(host.ErrInvalidTarget, "empty target")
+// targetKind classifies a desktop_open target.
+type targetKind int
+
+const (
+	targetLink targetKind = iota // an allowed link: open it
+	targetApp                    // a name: resolve it in the apps catalogue
+	targetRaw                    // AllowAny: hand it to the OS as is
+)
+
+// Classify decides how target is handled, or refuses it.
+func (p OpenPolicy) Classify(target string) (targetKind, error) {
+	t := strings.TrimSpace(target)
+	if t == "" {
+		return 0, host.Errorf(host.ErrInvalidTarget, "empty target")
 	}
 	if p.AllowAny {
-		return nil
+		return targetRaw, nil
 	}
-	u, err := url.Parse(target)
-	if err != nil || !openSchemes[strings.ToLower(u.Scheme)] {
-		return host.Errorf(host.ErrInvalidTarget, "only http(s) and mailto links may be opened (got %q)", target)
+	if u, err := url.Parse(t); err == nil && u.Scheme != "" && len(u.Scheme) > 1 {
+		if !openSchemes[strings.ToLower(u.Scheme)] {
+			return 0, host.Errorf(host.ErrInvalidTarget, "only http(s) and mailto links, or an installed app's name, may be opened (got %q)", target)
+		}
+		if (u.Scheme == "http" || u.Scheme == "https") && u.Host == "" {
+			return 0, host.Errorf(host.ErrInvalidTarget, "link has no host: %q", target)
+		}
+		return targetLink, nil
 	}
-	if (u.Scheme == "http" || u.Scheme == "https") && u.Host == "" {
-		return host.Errorf(host.ErrInvalidTarget, "link has no host: %q", target)
+	if strings.ContainsAny(t, `/\`) || strings.HasPrefix(t, "-") || strings.HasPrefix(t, "~") {
+		return 0, host.Errorf(host.ErrInvalidTarget, "paths can't be opened; name an installed app instead (got %q)", target)
 	}
-	return nil
+	return targetApp, nil
 }
 
 type tool struct {
@@ -60,24 +78,36 @@ type tool struct {
 	call       func(ctx context.Context, args map[string]any) (map[string]any, error)
 }
 
+// Lister returns the installed-app catalogue, computed now.
+type Lister func() ([]apps.App, error)
+
 // Tools is the desktop toolset.
 type Tools struct {
 	Host   *host.Host
 	Policy OpenPolicy
+	Apps   Lister // nil: no apps are launchable
 	tools  []tool
 }
 
-// New builds the toolset over a host.
-func New(h *host.Host, policy OpenPolicy) *Tools {
-	t := &Tools{Host: h, Policy: policy}
+// New builds the toolset over a host and an apps catalogue (nil for none).
+func New(h *host.Host, policy OpenPolicy, list Lister) *Tools {
+	t := &Tools{Host: h, Policy: policy, Apps: list}
 	winID := node.Param{Name: "window_id", Type: "string", Required: true,
 		Description: "Opaque window id exactly as returned by desktop_list_windows"}
 	t.tools = []tool{
-		{node.Spec{Name: ToolOpen, Description: "Open a web link on the user's computer in its default browser. Returns as soon as the computer accepted the request; it does not confirm the page loaded.",
-			Params:   []node.Param{{Name: "target", Type: "string", Required: true, Description: "Full http(s) URL, e.g. https://example.com"}},
-			Keywords: []string{"open", "browser", "website", "computer", "desktop"},
-			Examples: []node.Example{{VoiceCommand: "open youtube on my computer", Params: map[string]any{"target": "https://www.youtube.com"}, Primary: true}}},
+		{node.Spec{Name: ToolOpen, Description: "On the user's computer, open a web link in the default browser, or launch an installed application by name. Returns as soon as the computer accepted the request; it does not confirm the app or page came up.",
+			Params:   []node.Param{{Name: "target", Type: "string", Required: true, Description: "A full http(s) URL, e.g. https://example.com, or an installed app's name, e.g. Steam"}},
+			Keywords: []string{"open", "launch", "start", "app", "browser", "website", "computer", "desktop"},
+			Examples: []node.Example{
+				{VoiceCommand: "open youtube on my computer", Params: map[string]any{"target": "https://www.youtube.com"}, Primary: true},
+				{VoiceCommand: "launch steam on my computer", Params: map[string]any{"target": "Steam"}},
+			}},
 			host.CapOpen, t.open},
+		{node.Spec{Name: ToolListApps, Description: "List the applications installed on the user's computer that desktop_open can launch, optionally filtered by a word.",
+			Params:   []node.Param{{Name: "query", Type: "string", Description: "Optional word to filter by, e.g. studio"}},
+			Keywords: []string{"apps", "applications", "installed", "computer", "desktop"},
+			Examples: []node.Example{{VoiceCommand: "what apps are on my computer", Params: map[string]any{}, Primary: true}}},
+			host.CapOpen, t.listApps},
 		{node.Spec{Name: ToolGetVolume, Description: "Get the computer's master volume (0-100).",
 			Keywords: []string{"volume", "computer", "desktop"},
 			Examples: []node.Example{{VoiceCommand: "what's the volume on my computer", Params: map[string]any{}, Primary: true}}},
@@ -134,6 +164,13 @@ func (t *Tools) Call(ctx context.Context, name string, args map[string]any, _ no
 		if err != nil {
 			o := node.Fail("%v", err)
 			o["error_code"] = code(err)
+			var amb *apps.AmbiguousError
+			var nf *apps.NotFoundError
+			if errors.As(err, &amb) {
+				o["candidates"] = amb.Candidates // ask the user which one
+			} else if errors.As(err, &nf) && len(nf.Suggestions) > 0 {
+				o["suggestions"] = nf.Suggestions
+			}
 			return o, true
 		}
 		out["success"] = true
@@ -150,6 +187,10 @@ func code(err error) string {
 		return "window_not_found"
 	case errors.Is(err, host.ErrInvalidTarget), errors.Is(err, errBadArgs):
 		return "invalid_argument"
+	case errors.As(err, new(*apps.AmbiguousError)):
+		return "ambiguous"
+	case errors.Is(err, apps.ErrNotFound):
+		return "app_not_found"
 	}
 	return "failed"
 }
@@ -158,13 +199,61 @@ var errBadArgs = errors.New("bad arguments")
 
 func (t *Tools) open(ctx context.Context, args map[string]any) (map[string]any, error) {
 	target, _ := args["target"].(string)
-	if err := t.Policy.Check(target); err != nil {
+	kind, err := t.Policy.Classify(target)
+	if err != nil {
 		return nil, err
 	}
-	if err := t.Host.Open(ctx, target); err != nil {
+	if kind != targetApp {
+		if err := t.Host.Open(ctx, strings.TrimSpace(target)); err != nil {
+			return nil, err
+		}
+		return map[string]any{"opened": target, "note": "requested; launch is not confirmed"}, nil
+	}
+	list, err := t.catalogue()
+	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"opened": target, "note": "requested; launch is not confirmed"}, nil
+	app, err := apps.Resolve(list, target)
+	if err != nil {
+		return nil, err
+	}
+	// The path launched is the catalogue's, never the model's.
+	if err := t.Host.LaunchApp(ctx, app.Path); err != nil {
+		return nil, err
+	}
+	return map[string]any{"launched": app.Name, "note": "requested; launch is not confirmed"}, nil
+}
+
+func (t *Tools) catalogue() ([]apps.App, error) {
+	if t.Apps == nil {
+		return nil, nil
+	}
+	return t.Apps()
+}
+
+// maxListed caps desktop_list_apps so a big Start Menu can't flood the model's context.
+const maxListed = 300
+
+func (t *Tools) listApps(_ context.Context, args map[string]any) (map[string]any, error) {
+	list, err := t.catalogue()
+	if err != nil {
+		return nil, err
+	}
+	q, _ := args["query"].(string)
+	q = strings.ToLower(strings.TrimSpace(q))
+	names := []string{}
+	for _, a := range list {
+		if q == "" || strings.Contains(strings.ToLower(a.Name), q) {
+			names = append(names, a.Name)
+		}
+	}
+	out := map[string]any{"count": len(names)}
+	if len(names) > maxListed {
+		names = names[:maxListed]
+		out["truncated"] = true
+	}
+	out["apps"] = names
+	return out, nil
 }
 
 func (t *Tools) getVolume(ctx context.Context, _ map[string]any) (map[string]any, error) {

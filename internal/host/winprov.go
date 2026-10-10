@@ -110,3 +110,11 @@ func (w *Windows) Open(_ context.Context, target string) error {
 	}
 	return nil
 }
+
+// LaunchApp opens a Start Menu shortcut through the shell, exactly as a click would.
+func (w *Windows) LaunchApp(_ context.Context, path string) error {
+	if err := w.API.ShellOpen(path); err != nil {
+		return Errorf(ErrOperationFailed, "could not launch %q: %v", path, err)
+	}
+	return nil
+}

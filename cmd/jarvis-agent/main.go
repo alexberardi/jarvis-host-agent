@@ -19,14 +19,17 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
 
 	"golang.org/x/term"
 
+	"github.com/alexberardi/jarvis-host-agent/internal/apps"
 	"github.com/alexberardi/jarvis-host-agent/internal/desktop"
 	"github.com/alexberardi/jarvis-host-agent/internal/host"
+	"github.com/alexberardi/jarvis-host-agent/internal/macax"
 	"github.com/alexberardi/jarvis-host-agent/internal/node"
 	"github.com/alexberardi/jarvis-host-agent/internal/sidecar"
 )
@@ -52,6 +55,8 @@ func main() {
 		err = status(ctx, os.Args[2:])
 	case "try":
 		err = try(ctx, os.Args[2:])
+	case "apps":
+		err = appsCmd(os.Args[2:])
 	case "version":
 		fmt.Println(version)
 	case "-h", "--help", "help":
@@ -73,10 +78,11 @@ func usage(w io.Writer) {
            --server URL (jarvisd config service, e.g. http://10.0.0.122:7700)
            then either --email ADDR [--household ID] (prompts for the password)
            or --token prov_... --node-id ID (a token minted elsewhere)
-           [--name NAME] [--room ROOM] [--creds PATH] [--force]
+           [--name NAME] [--room ROOM] [--creds PATH] [--force | --if-needed]
   run      connect to jarvisd and serve tool calls until interrupted
            [--creds PATH] [--allow-open-any] [--sidecar-python PY --sidecar-commands DIR]
   status   show enrollment, reachability and what this host can do right now
+  apps     list launchable apps, or show what a name resolves to (never launches): apps [NAME]
   try      run one tool locally, no jarvisd involved: try TOOL ['{"arg": ...}']
   version
 `)
@@ -91,6 +97,22 @@ func credsPath(p string) (string, error) {
 
 func logger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+}
+
+// appCatalogue is the installed-apps lister: platform defaults plus apps.json, re-read on every
+// call so installs and config edits apply without a restart.
+func appCatalogue(log *slog.Logger) desktop.Lister {
+	return func() ([]apps.App, error) {
+		home, _ := os.UserHomeDir()
+		var cfg apps.Config
+		if p, err := apps.ConfigPath(); err == nil {
+			if cfg, err = apps.LoadConfig(p); err != nil {
+				// A broken config must not silently widen or empty the policy: refuse.
+				return nil, fmt.Errorf("apps config: %w", err)
+			}
+		}
+		return apps.Build(apps.Env{GOOS: runtime.GOOS, Home: home, Getenv: os.Getenv}, cfg).List()
+	}
 }
 
 func nativeHost() (*host.Host, error) {
@@ -116,16 +138,21 @@ func enroll(ctx context.Context, args []string) error {
 	room := fs.String("room", "desktop", "room")
 	cp := fs.String("creds", "", "credentials file (default: user config dir)")
 	force := fs.Bool("force", false, "replace existing credentials")
+	ifNeeded := fs.Bool("if-needed", false, "do nothing (exit 0) when already enrolled")
 	_ = fs.Parse(args)
-	if *server == "" {
-		return errors.New("--server is required")
-	}
 	path, err := credsPath(*cp)
 	if err != nil {
 		return err
 	}
 	if _, err := node.LoadCreds(path); err == nil && !*force {
+		if *ifNeeded {
+			fmt.Printf("Already enrolled (%s).\n", path)
+			return nil
+		}
 		return fmt.Errorf("already enrolled (%s); pass --force to enroll again", path)
+	}
+	if *server == "" {
+		return errors.New("--server is required (jarvisd's address, e.g. http://10.0.0.122:7700)")
 	}
 	hc := &http.Client{Timeout: 20 * time.Second}
 	svcs, err := node.Discover(ctx, hc, *server)
@@ -246,7 +273,13 @@ func run(ctx context.Context, args []string) error {
 		return err
 	}
 	log := logger()
-	tools := node.Multi{desktop.New(h, desktop.OpenPolicy{AllowAny: *anyOpen})}
+	if macax.Supported() && !macax.Trusted() {
+		// macOS adds this app to Privacy & Security → Accessibility and shows its prompt. Window
+		// tools appear once the user turns it on (capabilities are computed per call).
+		macax.Prompt()
+		log.Warn("Accessibility not granted: window control is off until you enable Jarvis Agent in System Settings → Privacy & Security → Accessibility")
+	}
+	tools := node.Multi{desktop.New(h, desktop.OpenPolicy{AllowAny: *anyOpen}, appCatalogue(log))}
 	if *py != "" && *cmdDir != "" {
 		sc, err := sidecar.Start(ctx, *py, *cmdDir, log)
 		if err != nil {
@@ -276,6 +309,15 @@ func status(ctx context.Context, args []string) error {
 		return err
 	}
 	fmt.Printf("platform:     %s\ncapabilities: %s\n", h.Platform(), strings.Join(caps, ", "))
+	if macax.Supported() {
+		fmt.Printf("accessibility: %v\n", macax.Trusted())
+	}
+	if list, err := appCatalogue(nil)(); err != nil {
+		fmt.Printf("apps:         %v\n", err)
+	} else {
+		cp, _ := apps.ConfigPath()
+		fmt.Printf("apps:         %d launchable (config: %s)\n", len(list), cp)
+	}
 	path, err := credsPath(*cp)
 	if err != nil {
 		return err
@@ -314,7 +356,7 @@ func try(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	ts := desktop.New(h, desktop.OpenPolicy{AllowAny: *anyOpen})
+	ts := desktop.New(h, desktop.OpenPolicy{AllowAny: *anyOpen}, appCatalogue(nil))
 	if fs.NArg() == 0 {
 		for _, d := range ts.Available(ctx) {
 			fmt.Println(d.Name)
@@ -333,5 +375,26 @@ func try(ctx context.Context, args []string) error {
 	}
 	b, _ := json.MarshalIndent(out, "", "  ")
 	fmt.Println(string(b))
+	return nil
+}
+
+// --- apps ---
+
+func appsCmd(args []string) error {
+	list, err := appCatalogue(nil)()
+	if err != nil {
+		return err
+	}
+	if len(args) == 0 {
+		for _, a := range list {
+			fmt.Printf("%-40s %s\n", a.Name, a.Path)
+		}
+		return nil
+	}
+	a, err := apps.Resolve(list, strings.Join(args, " "))
+	if err != nil {
+		return err
+	}
+	fmt.Printf("%s -> %s\n", a.Name, a.Path)
 	return nil
 }

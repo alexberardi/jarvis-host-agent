@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sort"
 )
 
@@ -100,6 +101,10 @@ type Backend interface {
 	FocusWindow(ctx context.Context, id string) error
 	CloseWindow(ctx context.Context, id string) error
 	Open(ctx context.Context, target string) error
+	// LaunchApp starts an installed application from its catalogue path (a .app bundle, a
+	// .desktop file or a .lnk shortcut). Fire-and-forget, like Open. The path always comes
+	// from the app catalogue, never from the model.
+	LaunchApp(ctx context.Context, path string) error
 }
 
 // Host gates, clamps and validates in front of exactly one Backend. It is the only thing that
@@ -244,4 +249,16 @@ func (h *Host) Open(ctx context.Context, target string) error {
 		return Errorf(ErrInvalidTarget, "empty target")
 	}
 	return h.b.Open(ctx, target)
+}
+
+// LaunchApp starts an installed app by its catalogue path. It is gated on CapOpen: launching an
+// app and opening a link are the same user-visible ability.
+func (h *Host) LaunchApp(ctx context.Context, path string) error {
+	if err := h.gate(ctx, CapOpen); err != nil {
+		return err
+	}
+	if !filepath.IsAbs(path) {
+		return Errorf(ErrInvalidTarget, "app path must be absolute: %q", path)
+	}
+	return h.b.LaunchApp(ctx, path)
 }

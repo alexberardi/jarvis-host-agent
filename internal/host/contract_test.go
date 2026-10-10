@@ -3,6 +3,7 @@ package host
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
@@ -302,4 +303,41 @@ func TestCapabilityGateRunsBeforeTheBackend(t *testing.T) {
 	if strings.Contains(s.allCommands(), "wmctrl") {
 		t.Fatalf("backend ran despite the gate:\n%s", s.allCommands())
 	}
+}
+
+// LaunchApp is fire-and-forget, launches exactly the catalogue path, refuses relative paths,
+// and is gated like open.
+func TestLaunchAppIsFireAndForget(t *testing.T) {
+	app := filepath.Join(t.TempDir(), "Steam")
+	forEach(t, func(t *testing.T, s subject) {
+		b, rec := s.full()
+		if err := New(b).LaunchApp(ctx, app); err != nil {
+			t.Fatal(err)
+		}
+		cmds := rec.allCommands()
+		if !strings.Contains(cmds, app) {
+			t.Fatalf("launch did not use the catalogue path:\n%s", cmds)
+		}
+		if sys, ok := rec.(*fakeSys); ok {
+			if len(sys.starts) != 1 {
+				t.Fatalf("launch did not Start exactly once: %v", sys.starts)
+			}
+			for _, r := range sys.runs {
+				if strings.Contains(r, app) {
+					t.Fatalf("launch waited on a Run: %s", r)
+				}
+			}
+		}
+		b2, rec2 := s.full()
+		if err := New(b2).LaunchApp(ctx, "Steam"); !errors.Is(err, ErrInvalidTarget) {
+			t.Fatalf("relative path: err = %v", err)
+		}
+		if strings.Contains(rec2.allCommands(), "Steam") {
+			t.Fatalf("a relative path reached the OS:\n%s", rec2.allCommands())
+		}
+		e, _ := s.empty()
+		if err := New(e).LaunchApp(ctx, app); !errors.Is(err, ErrNotSupported) {
+			t.Fatalf("empty host: err = %v", err)
+		}
+	})
 }

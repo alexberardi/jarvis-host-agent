@@ -184,3 +184,14 @@ func (d *Darwin) Open(_ context.Context, target string) error {
 	}
 	return nil
 }
+
+// LaunchApp opens a .app bundle with open(1), which starts it or brings it forward.
+func (d *Darwin) LaunchApp(_ context.Context, path string) error {
+	if !d.Sys.LookPath("open") {
+		return Errorf(ErrNotSupported, "the open binary is unavailable")
+	}
+	if err := d.Sys.Start("open", path); err != nil {
+		return Errorf(ErrOperationFailed, "could not launch %q: %v", path, err)
+	}
+	return nil
+}

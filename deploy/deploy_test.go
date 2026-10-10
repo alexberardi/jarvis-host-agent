@@ -229,3 +229,23 @@ func TestEveryTemplateExplainsTheSessionRule(t *testing.T) {
 		}
 	}
 }
+
+func TestMacBundleInfoPlist(t *testing.T) {
+	p := plistDict(t, read(t, "macos/Info.plist"))
+	for k, want := range map[string]string{
+		"CFBundleIdentifier":  "string:io.jarvis.agent", // TCC grants key on this: keep it stable
+		"CFBundleExecutable":  "string:jarvis-agent",
+		"CFBundlePackageType": "string:APPL",
+		"LSUIElement":         "true:",
+	} {
+		if p[k] != want {
+			t.Errorf("%s = %q, want %q", k, p[k], want)
+		}
+	}
+	if !strings.HasPrefix(p["NSAppleEventsUsageDescription"], "string:") {
+		t.Error("NSAppleEventsUsageDescription is required to drive System Events")
+	}
+	if l := plistDict(t, read(t, plistPath)); l["AssociatedBundleIdentifiers"] != "string:io.jarvis.agent" {
+		t.Errorf("LaunchAgent AssociatedBundleIdentifiers = %q", l["AssociatedBundleIdentifiers"])
+	}
+}
