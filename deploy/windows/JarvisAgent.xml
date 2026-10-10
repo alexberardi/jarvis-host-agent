@@ -14,8 +14,8 @@
 -->
 <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
-    <Description>Jarvis Host Agent - OS control for the co-located Jarvis node</Description>
-    <URI>\Jarvis\JarvisHostAgent</URI>
+    <Description>Jarvis desktop agent - a Jarvis node offering OS control</Description>
+    <URI>\Jarvis\JarvisAgent</URI>
   </RegistrationInfo>
   <Triggers>
     <LogonTrigger>
@@ -62,6 +62,7 @@
   <Actions Context="Author">
     <Exec>
       <Command>__AGENT_BIN__</Command>
+      <Arguments>run</Arguments>
     </Exec>
   </Actions>
 </Task>
