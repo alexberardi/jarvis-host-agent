@@ -95,7 +95,7 @@ func New(h *host.Host, policy OpenPolicy, list Lister) *Tools {
 	winID := node.Param{Name: "window_id", Type: "string", Required: true,
 		Description: "Opaque window id exactly as returned by desktop_list_windows"}
 	t.tools = []tool{
-		{node.Spec{Name: ToolOpen, Description: "On the user's computer, open a web link in the default browser, or launch an installed application by name. Returns as soon as the computer accepted the request; it does not confirm the app or page came up.",
+		{node.Spec{Name: ToolOpen, Description: "On the user's computer, open a web link in the default browser, or launch an installed app by name. Use desktop_list_apps first if you're unsure an app is installed or of its exact name. If the result is ambiguous, ask the user which of the candidates they meant. Returns as soon as the computer accepted the request; it does not confirm the app or page came up.",
 			Params:   []node.Param{{Name: "target", Type: "string", Required: true, Description: "A full http(s) URL, e.g. https://example.com, or an installed app's name, e.g. Steam"}},
 			Keywords: []string{"open", "launch", "start", "app", "browser", "website", "computer", "desktop"},
 			Examples: []node.Example{
@@ -103,10 +103,14 @@ func New(h *host.Host, policy OpenPolicy, list Lister) *Tools {
 				{VoiceCommand: "launch steam on my computer", Params: map[string]any{"target": "Steam"}},
 			}},
 			host.CapOpen, t.open},
-		{node.Spec{Name: ToolListApps, Description: "List the applications installed on the user's computer that desktop_open can launch, optionally filtered by a word.",
+		{node.Spec{Name: ToolListApps, Description: "List the apps installed on the user's computer, i.e. the apps desktop_open can open. ALWAYS call this to answer any question about what is installed, available or openable on the computer (\"what apps can you open?\", \"do I have Steam?\", \"which games are installed?\"). Never answer those from general knowledge: only this list is accurate for this computer. Optionally filter by a word.",
 			Params:   []node.Param{{Name: "query", Type: "string", Description: "Optional word to filter by, e.g. studio"}},
-			Keywords: []string{"apps", "applications", "installed", "computer", "desktop"},
-			Examples: []node.Example{{VoiceCommand: "what apps are on my computer", Params: map[string]any{}, Primary: true}}},
+			Keywords: []string{"apps", "applications", "programs", "games", "installed", "available", "open", "computer", "desktop"},
+			Examples: []node.Example{
+				{VoiceCommand: "what apps can you open", Params: map[string]any{}, Primary: true},
+				{VoiceCommand: "what apps are on my computer", Params: map[string]any{}},
+				{VoiceCommand: "do I have steam installed", Params: map[string]any{"query": "steam"}},
+			}},
 			host.CapOpen, t.listApps},
 		{node.Spec{Name: ToolGetVolume, Description: "Get the computer's master volume (0-100).",
 			Keywords: []string{"volume", "computer", "desktop"},
@@ -117,7 +121,7 @@ func New(h *host.Host, policy OpenPolicy, list Lister) *Tools {
 			Keywords: []string{"volume", "louder", "quieter", "computer", "desktop"},
 			Examples: []node.Example{{VoiceCommand: "set my computer volume to 30", Params: map[string]any{"volume": 30}, Primary: true}}},
 			host.CapVolumeSet, t.setVolume},
-		{node.Spec{Name: ToolList, Description: "List the open windows on the user's computer: id, title, app, minimized. Use the ids with the other window tools.",
+		{node.Spec{Name: ToolList, Description: "List the windows open on the user's computer: id, title, app, minimized. Call it to answer what's open on screen, and before minimizing, focusing or closing a window, to get its id. Never invent ids.",
 			Keywords: []string{"windows", "apps", "computer", "desktop"},
 			Examples: []node.Example{{VoiceCommand: "what windows are open on my computer", Params: map[string]any{}, Primary: true}}},
 			host.CapWindowsList, t.list},
