@@ -42,6 +42,13 @@ The sidecar test needs a Python that can `import jarvis_command_sdk`
 
 Gate on exit codes: never judge a run by output piped through `tail`.
 
+**Never launch real GUI apps or open real links on a desktop someone is using** (that includes
+`jarvis-agent try desktop_open ...`). App launching is covered by the fake app trees in
+`internal/apps` and the fake `Sys`/`Win32` in the host contract suite. The only native test
+that touches the screen, `TestNativeOpen`, is off unless `JARVIS_HOST_NATIVE_OPEN=1`; keep any
+future real-launch test behind an opt-in variable the same way. Use `jarvis-agent apps NAME`
+to check a resolution: it never launches.
+
 ## Layout
 
 ```
