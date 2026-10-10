@@ -317,6 +317,24 @@ This is not needed for MVS.
 
 ---
 
+### 3.6 Measured on a real Pi Zero 2 W (jarvis-dev, 2026-10-10)
+
+Trixie arm64, Seeed 2-mic HAT, `dsnoopmic` at 48 kHz, 1 GHz, no throttling (49–58 °C). 15-minute windows; the HAT speaker played the TTS "hey jarvis" clip every 60 s (15 plays) into the HAT mic.
+
+| Run | Wakes | CPU (one core) | Memory |
+|---|---|---|---|
+| Python node 0.3.4, whole service, idle listening (mpd crash loop fixed first) | n/a | 92.6% | 123 MB RSS + 96 MB swapped (~219 MB) |
+| Python node 0.3.4, whole service, 15 plays at 70 s spacing | **15/15** (1 backlog drop) | | |
+| Go `wakelive` (purego ALSA + ORT oww) | **15/15**, 0 false | 54.5% | **39.5 MB RSS** |
+| `pywakelive.py` (single-threaded harness, stock) | 2/15 | 41% | 183 MB |
+| `pywakelive.py --lean --noscipy` | 6/15 | 39% | 131 MB |
+
+- The `pywakelive.py` miss counts are a **harness artifact**: it reads and predicts in one loop with `exception_on_overflow=False`, so when predict falls behind, PyAudio overflows and the audio (and the wake word) is silently dropped. That is also why its CPU looks lower than Go's. The real node reads on a separate thread and caught every wake. Use the harness for memory only.
+- Go had 140 ALSA xruns in 15 min (0 chunks late over 80 ms) and still fired on every play; worth a larger period/buffer on the Zero.
+- The whole Python service idles at ~93% of a core on the Zero (wake loop plus everything else), against 54.5% for the Go wake loop alone.
+- Before this run jarvis-dev had a leaked audacy mpd drop-in crash-looping mpd (5,169 restarts, ~4 s CPU each); fixed by jarvis-node-setup #143 (self-heal on boot).
+- Memory quick win (jarvis-node-setup #144, merged): −77 MB on the Pi 4, wake scores bit-identical.
+
 ## 4. Memory budget (Zero 2 W: 512 MB, ~416 MB usable)
 
 RSS in MB. Measured values come from the Pi 4; arm64 userland memory is the same on a Zero 2 W.
@@ -528,7 +546,7 @@ These are **still needed**; install.sh step lines are cited:
 
 ## 9. Risks
 
-- **The Zero 2 W was not measured directly.** CPU comes from a 600 MHz A72 proxy (Go wake ~49% of
+- **(Resolved 2026-10-10, §3.6: measured on a real Zero 2 W.)** Previously: the Zero 2 W was not measured directly. CPU comes from a 600 MHz A72 proxy (Go wake ~49% of
   one core) and memory is from the Pi 4. Thermal behaviour and the tiny dsnoop buffer (85 ms)
   under load are untested. Run `wakelive` on a real Zero 2 W before committing to the Pi phase.
 - **purego means dynamic linking against glibc.** The binary needs a compatible glibc for ORT, and
