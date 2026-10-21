@@ -1,5 +1,8 @@
 # jarvis-agent (desktop node, POC)
 
+> [!WARNING]
+> **Retired: no longer maintained, and this repository will be archived.** This proof of concept became the Jarvis Automation Agent, which lives in [jarvis-server](https://github.com/alexberardi/jarvis-server) (`cmd/jarvis-agent`). The old multi-container stack is replaced by jarvisd ([jarvis-server](https://github.com/alexberardi/jarvis-server)). New installs: [installer.jarvisautomation.io](https://installer.jarvisautomation.io). Moving an existing install: [Migrating from the Docker install](https://docs.jarvisautomation.dev/install/migrating-from-docker/).
+
 A Jarvis node for desktops. One Go binary enrolls with jarvisd like a Pi node, connects to
 jarvisd's MQTT, and offers OS control as client tools: open a link or launch an installed app
 by name, get/set volume, and list/minimise/focus/close windows. It works on Linux, macOS and
